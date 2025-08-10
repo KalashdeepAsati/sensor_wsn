@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Urban Breath — Blush Pro • Phone</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --pink:#e75480; --pink-2:#ff8fab; --rose:#ffd6e0; --bg:#fff6f9; --ink:#4a2a34; --muted:#7f5962;
+    --card:#ffffff; --border:#ffd3e0; --accent:#9b287b; --peach:#ffb3c6; --lav:#dcb0ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Poppins',system-ui,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,var(--bg),#ffffff);color:var(--ink)}
+  header{position:sticky;top:0;background:#fff;backdrop-filter:saturate(1.2) blur(6px);padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+  header h1{font-size:18px;margin:0;color:var(--pink)}
+  main{max-width:920px;margin:0 auto;padding:16px;display:grid;gap:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:14px;box-shadow:0 8px 20px rgba(231,84,128,.08)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{background:linear-gradient(90deg,var(--pink-2),var(--peach));border:none;color:white;padding:10px 16px;border-radius:999px;cursor:pointer;font-weight:600}
+  button.ghost{background:#fff;color:var(--pink);border:1px solid var(--border)}
+  textarea,input{width:100%;border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
+  .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#fff;color:#8a4f5e;font-size:12px}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .metric{background:#fff;border:1px solid var(--border);border-radius:14px;padding:10px;text-align:center}
+  .metric b{font-size:18px}
+  .progress{height:10px;background:#ffe6ee;border-radius:999px;overflow:hidden}
+  .progress > span{display:block;height:100%;background:linear-gradient(90deg,#ff9db8,#ff5d8f)}
+  .nodes{display:flex;gap:10px;flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--border);padding:6px 10px;border-radius:999px;background:#fff}
+  .badge{background:#ffebf2;color:#a32360;border-radius:8px;padding:2px 6px;font-size:12px}
+  .hint{color:var(--muted);font-size:12px}
+  video,canvas{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>📱 Urban Breath — Blush Pro</h1>
+  <div class="row">
+    <span class="pill" id="micP">🎤 mic: –</span>
+    <span class="pill" id="camP">📷 cam: –</span>
+    <span class="pill" id="geoP">📍 geo: –</span>
+    <span class="pill" id="rtcP">🔗 rtc: –</span>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="grid">
+      <div><label>Display Name</label><input id="label" placeholder="PinkRider-01"/></div>
+      <div><label>Sampling (Hz)</label><input id="hz" value="1"/></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="grantBtn">Grant Mic • Cam • GPS</button>
+      <button id="offerBtn" class="ghost">Create Offer</button>
+      <button id="setAnswerBtn" class="ghost">Set Answer</button>
+    </div>
+    <div class="row"><textarea id="offerOut" placeholder="Local Offer (copy to laptop)"></textarea></div>
+    <div class="row"><textarea id="answerIn" placeholder="Paste Laptop Answer JSON"></textarea></div>
+    <div class="hint">After pairing, you'll receive <b>Missions</b> (named geofences). Your phone auto-samples only when inside an active mission and facing the sky.</div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:6px 0">Missions</h3>
+    <div id="missions" class="nodes"></div>
+    <div class="hint">Tap a mission to toggle active/inactive.</div>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div class="metric"><div>Noise</div><b id="noiseVal">–</b><div class="hint">dB est.</div></div>
+      <div class="metric"><div>Haze</div><b id="hazeVal">–</b><div class="hint">0 (clear) → 1 (hazy)</div></div>
+      <div class="metric"><div>Light</div><b id="lightVal">–</b><div class="hint">lux</div></div>
+      <div class="metric"><div>Mission</div><b id="missionVal">–</b><div class="hint">progress</div></div>
+    </div>
+    <div class="progress" style="margin-top:10px"><span id="prog" style="width:0%"></span></div>
+    <div class="hint" style="margin-top:6px">Points: <span class="badge" id="pts">0</span> · Status: <span id="status">idle</span></div>
+  </div>
+
+  <video id="vid" autoplay playsinline muted></video>
+  <canvas id="canvas" width="160" height="120"></canvas>
+</main>
+
+<script>
+(()=>{
+  const el=id=>document.getElementById(id);
+  const state={pc:null,dc:null,ctx:null,an:null,buf:null,geo:null,haveMic:false,haveCam:false,ori:null,active:{},
+    missions:[], current:null, progress:0, target:24, points:0};
+
+  // helpers
+  function pill(id, ok, text){ const p=el(id); p.textContent=p.textContent.split(':')[0]+': '+(text|| (ok?'ok':'off')); p.style.color=ok?'#1e7c6e':'#8a4f5e'; }
+
+  // permissions
+  async function grant(){
+    try{
+      const a=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
+      const AC=window.AudioContext||window.webkitAudioContext; state.ctx=new AC();
+      const src=state.ctx.createMediaStreamSource(a); state.an=state.ctx.createAnalyser(); state.an.fftSize=1024; src.connect(state.an);
+      state.buf=new Float32Array(state.an.fftSize); state.haveMic=true; pill('micP',true,'granted');
+    }catch{ pill('micP',false,'denied'); }
+
+    try{
+      const v=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment', width:{ideal:320}, height:{ideal:240}}, audio:false});
+      el('vid').srcObject=v; await el('vid').play().catch(()=>{});
+      state.haveCam=true; pill('camP',true,'granted');
+    }catch{ pill('camP',false,'denied'); }
+
+    if('geolocation' in navigator){
+      navigator.geolocation.watchPosition(p=>{ state.geo={lat:p.coords.latitude, lon:p.coords.longitude}; pill('geoP',true,`${state.geo.lat.toFixed(3)}, ${state.geo.lon.toFixed(3)}`); }, _=>pill('geoP',false,'denied'), {enableHighAccuracy:true});
+    }else pill('geoP',false,'unavailable');
+  }
+
+  // measurements
+  function noiseDb(){
+    if(!state.an) return 0; state.an.getFloatTimeDomainData(state.buf);
+    let s=0; for(let i=0;i<state.buf.length;i++) s += state.buf[i]*state.buf[i];
+    const rms=Math.sqrt(s/state.buf.length); return Math.max(0, Math.min(120, 20*Math.log10(rms+1e-6)+90));
+  }
+  function hazeFromCam(){
+    const vid=el('vid'); if(!state.haveCam||vid.readyState<2) return {h:0.5,b:0};
+    const cv=el('canvas'), ctx=cv.getContext('2d'); ctx.drawImage(vid,0,0,cv.width,cv.height);
+    const d=ctx.getImageData(0,0,cv.width,cv.height).data;
+    let sumL=0,sumL2=0,sumS=0,N=0,blue=0;
+    for(let i=0;i<d.length;i+=4){ const r=d[i]/255,g=d[i+1]/255,b=d[i+2]/255;
+      const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2;
+      const s=mx===mn?0:(mx-mn)/(1-Math.abs(2*l-1)+1e-6);
+      sumL+=l; sumL2+=l*l; sumS+=s; N++; blue+= b/(r+g+1e-6);
+    }
+    const meanL=sumL/N, varL=sumL2/N-meanL*meanL, contr=Math.sqrt(Math.max(0,varL)), sat=sumS/N, blueR=blue/N;
+    let haze=(1-sat)*0.5 + (0.3-contr)*1.2*0.3 + (0.6-blueR)*0.2; haze=Math.max(0,Math.min(1,haze));
+    return {h:haze, b: Math.round(meanL*255)};
+  }
+  function distM(a,b){ const R=6371000; const toR=x=>x*Math.PI/180;
+    const dLat=toR(b.lat-a.lat), dLon=toR(b.lon-a.lon); const lat1=toR(a.lat), lat2=toR(b.lat);
+    const h=Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(h));
+  }
+
+  // missions UI
+  function renderMissions(){
+    const box=el('missions'); box.innerHTML='';
+    state.missions.forEach(m=>{
+      const btn=document.createElement('button');
+      btn.className='chip'; btn.textContent=`${m.name} • R=${m.r}m`; btn.style.borderStyle = state.active[m.id]?'solid':'dashed';
+      btn.onclick=()=>{ state.active[m.id]=!state.active[m.id]; renderMissions(); };
+      box.appendChild(btn);
+    });
+  }
+
+  // rtc
+  async function createOffer(){
+    state.pc=new RTCPeerConnection({iceServers:[{urls:['stun:stun.l.google.com:19302']}]});
+    state.dc=state.pc.createDataChannel('blushpro',{ordered:true});
+    state.dc.onopen=()=>{ pill('rtcP',true,'connected'); const nm=(el('label').value||'PinkRider').trim(); state.dc.send(JSON.stringify({type:'hello', device:nm, caps:{mic:state.haveMic,cam:state.haveCam}})); };
+    state.pc.onicecandidate = ev => { el('offerOut').value = JSON.stringify(state.pc.localDescription); };
+    const off=await state.pc.createOffer(); await state.pc.setLocalDescription(off); el('offerOut').value = JSON.stringify(state.pc.localDescription);
+  }
+  async function setAnswer(){
+    try{ const ans=JSON.parse(el('answerIn').value); await state.pc.setRemoteDescription(ans); }
+    catch{ alert('Invalid answer JSON'); }
+  }
+
+  // receive missions
+  function onMessage(obj){
+    if(obj.type==='missions'){ state.missions=obj.items||[]; state.target = obj.target || 24; renderMissions(); }
+  }
+
+  // sampling loop
+  setInterval(()=>{
+    const nm=(el('label').value||'PinkRider').trim();
+    const hz=Math.max(0.2, Math.min(5, parseFloat(el('hz').value)||1));
+    const now=Date.now(); // (not used for period control in this simple loop)
+    const h = hazeFromCam(); const db = noiseDb(); const light = h.b;
+    el('noiseVal').textContent=db.toFixed(1); el('hazeVal').textContent=h.h.toFixed(2); el('lightVal').textContent=light;
+    let activeMission=null;
+    if(state.geo && state.missions.length){
+      for(const m of state.missions){
+        if(!state.active[m.id]) continue;
+        const d = distM(state.geo, {lat:m.lat, lon:m.lon});
+        if(d <= m.r){ activeMission=m; break; }
+      }
+    }
+    if(activeMission && state.dc && state.dc.readyState==='open'){
+      el('status').textContent='sampling'; el('missionVal').textContent=activeMission.name;
+      if(Math.random()<0.5){ // award points roughly every other sample for visual feedback
+        state.points += 1; el('pts').textContent = state.points;
+        state.progress = Math.min(state.target, state.progress+1);
+        el('prog').style.width = (100*state.progress/state.target)+'%';
+      }
+      const msg={type:'urban', mission:activeMission.id, device:nm, ts:new Date().toISOString(), noise_db:db, haze:h.h, light:light, geo:state.geo||null};
+      try{ state.dc.send(JSON.stringify(msg)); }catch{}
+    }else{
+      el('status').textContent='idle'; el('missionVal').textContent='—';
+    }
+  }, 1000);
+
+  document.getElementById('grantBtn').addEventListener('click', grant);
+  document.getElementById('offerBtn').addEventListener('click', createOffer);
+  document.getElementById('setAnswerBtn').addEventListener('click', setAnswer);
+
+  // geo
+  if('geolocation' in navigator){
+    navigator.geolocation.watchPosition(p=>{ state.geo={lat:p.coords.latitude, lon:p.coords.longitude}; });
+  }
+})();
+</script>
+</body>
+</html>

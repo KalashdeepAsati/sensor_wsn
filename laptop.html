@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Urban Breath — Blush Pro • Dashboard</title>
+<link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --pink:#e75480; --pink-2:#ff8fab; --rose:#ffd6e0; --bg:#fff0f6; --ink:#41252d; --muted:#7b5d64;
+    --card:#ffffff; --border:#ffd1df; --lav:#dcb0ff; --mag:#ff3399; --peach:#ffb3c6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,var(--bg),#ffffff);font-family:'Poppins',system-ui,Segoe UI,Roboto,Arial,sans-serif;color:var(--ink);display:grid;grid-template-columns:320px 1fr;grid-template-rows:64px 1fr;height:100vh}
+  header{grid-column:1 / -1;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 16px;position:sticky;top:0;z-index:2}
+  header h1{margin:0;font-size:20px;color:var(--pink)}
+  #left{grid-row:2;grid-column:1;background:#ffffffaa;border-right:1px solid var(--border);padding:12px;overflow:auto}
+  #main{grid-row:2;grid-column:2;position:relative}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px;box-shadow:0 8px 20px rgba(231,84,128,.08);margin-bottom:10px}
+  textarea{width:100%;height:70px;border:1px solid var(--border);border-radius:12px;padding:8px}
+  button{background:linear-gradient(90deg,var(--pink-2),var(--peach));border:none;color:white;padding:10px 16px;border-radius:999px;cursor:pointer;font-weight:600}
+  button.ghost{background:#fff;color:var(--pink);border:1px solid var(--border)}
+  .metric{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .pill{display:inline-flex;gap:6px;align-items:center;border-radius:999px;border:1px solid var(--border);padding:6px 10px;background:#fff;font-size:12px;color:#8a4f5e}
+  #map{position:absolute;inset:0}
+  .dock{position:absolute;left:0;right:0;bottom:0;display:flex;gap:10px;padding:10px;overflow:auto}
+  .bubble{background:#fff;border:1px solid var(--border);border-radius:18px;padding:8px 12px;min-width:140px;box-shadow:0 8px 18px rgba(0,0,0,.06)}
+  .legend{position:absolute;top:10px;left:10px;display:flex;gap:10px}
+  .legend .chip{background:#fff;border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Urban Breath — Blush Pro</h1>
+  <div class="pill" id="rtc">🔗 connections: 0</div>
+</header>
+
+<aside id="left">
+  <div class="card">
+    <h3 style="margin:6px 0">Pair a Phone</h3>
+    <textarea id="offerIn" placeholder="Paste phone offer"></textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <button id="acceptBtn">Accept Offer</button>
+    </div>
+    <textarea id="answerOut" placeholder="Copy this to phone"></textarea>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:6px 0">Crowd Missions</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <button class="ghost" id="addMission">Add Mission</button>
+      <button class="ghost" id="sendMissions">Send to Phones</button>
+      <button class="ghost" id="clearMissions">Clear</button>
+      <button class="ghost" id="exportBtn">Export CSV</button>
+    </div>
+    <div id="missionList"></div>
+    <div class="pill">Tip: Click on the map to place a mission center; default radius 100 m. Edit name/radius in the list.</div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:6px 0">Live Metrics</h3>
+    <div class="metric">
+      <div class="pill">Nodes <b id="mNodes">0</b></div>
+      <div class="pill">Samples <b id="mSamples">0</b></div>
+      <div class="pill">Avg Noise <b id="mNoise">–</b></div>
+      <div class="pill">Avg Haze <b id="mHaze">–</b></div>
+    </div>
+  </div>
+</aside>
+
+<main id="main">
+  <div class="legend">
+    <div class="chip">💗 Noise Heat</div>
+    <div class="chip">💜 Haze Heat</div>
+    <div class="chip">🎯 Missions</div>
+  </div>
+  <div id="map"></div>
+  <div class="dock" id="dock"></div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+<script>
+(()=>{
+  const el=id=>document.getElementById(id);
+  let peers=[], dcs=[], nodes=new Map(), missions=[], rows=[];
+  const map=L.map('map').setView([20.5937,78.9629], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  const heatNoise=L.heatLayer([], {radius:24, blur:14, gradient:{0.3:'#ffb3c6',0.7:'#ff5d8f',1:'#ff0055'}}).addTo(map);
+  const heatHaze=L.heatLayer([], {radius:24, blur:14, gradient:{0.3:'#e7c6ff',0.7:'#c77dff',1:'#7b2cbf'}}).addTo(map);
+  const missionLayer=L.layerGroup().addTo(map);
+
+  function updateHeader(){ el('rtc').textContent='🔗 connections: '+peers.length; }
+  function ensureNode(name){
+    if(nodes.has(name)) return nodes.get(name);
+    const record={name, samples:0, bubble:document.createElement('div')};
+    record.bubble.className='bubble';
+    record.bubble.innerHTML=`<b>${name}</b><br><span class="small">0 samples</span>`;
+    el('dock').appendChild(record.bubble);
+    nodes.set(name, record);
+    el('mNodes').textContent = nodes.size;
+    return record;
+  }
+
+  // Missions
+  function addMission(latlng){
+    const id='M'+(missions.length+1);
+    const m={id, name:'Mission '+missions.length, lat:latlng.lat, lon:latlng.lng, r:100};
+    missions.push(m);
+    const circle=L.circle([m.lat,m.lon], {radius:m.r, color:'#e75480', fillColor:'#ffc2d1', fillOpacity:.2}).addTo(missionLayer);
+    circle.bindTooltip(m.name);
+    renderMissionList();
+  }
+  function renderMissionList(){
+    const box=el('missionList'); box.innerHTML='';
+    missions.forEach(m=>{
+      const wrap=document.createElement('div'); wrap.style.margin='6px 0';
+      wrap.innerHTML=`<input data-id="${m.id}" class="mname" value="${m.name}" style="width:55%"/> 
+                      <input data-id="${m.id}" class="mr" value="${m.r}" style="width:70px"/> m
+                      <span class="pill">(${m.lat.toFixed(4)}, ${m.lon.toFixed(4)})</span>`;
+      box.appendChild(wrap);
+    });
+    box.querySelectorAll('.mname').forEach(inp=>inp.onchange=e=>{ const mi=missions.find(x=>x.id===inp.dataset.id); mi.name=inp.value; });
+    box.querySelectorAll('.mr').forEach(inp=>inp.onchange=e=>{ const mi=missions.find(x=>x.id===inp.dataset.id); mi.r=parseFloat(inp.value||100); missionLayer.clearLayers(); missions.forEach(addCircleOnly); });
+  }
+  function addCircleOnly(m){ const c=L.circle([m.lat,m.lon], {radius:m.r, color:'#e75480', fillColor:'#ffc2d1', fillOpacity:.2}).addTo(missionLayer); c.bindTooltip(m.name); }
+  map.on('click', e=>addMission(e.latlng));
+
+  function sendMissions(){
+    const payload=JSON.stringify({type:'missions', items:missions, target:24});
+    dcs.forEach(dc=>{ if(dc.readyState==='open') dc.send(payload); });
+  }
+
+  async function accept(){
+    try{
+      const offer=JSON.parse(el('offerIn').value);
+      const pc=new RTCPeerConnection({iceServers:[{urls:['stun:stun.l.google.com:19302']}]});
+      peers.push(pc); updateHeader();
+      pc.ondatachannel = ev => {
+        const dc=ev.channel; dcs.push(dc);
+        dc.onmessage = e => { try{ const data=JSON.parse(e.data); onMsg(dc, data); }catch(_){} };
+      };
+      pc.onicecandidate = ev => { el('answerOut').value = JSON.stringify(pc.localDescription); };
+      await pc.setRemoteDescription(offer);
+      const ans=await pc.createAnswer(); await pc.setLocalDescription(ans);
+      el('answerOut').value = JSON.stringify(pc.localDescription);
+    }catch(e){ alert('Bad Offer JSON'); }
+  }
+
+  function onMsg(dc, obj){
+    if(obj.type==='hello'){ ensureNode(obj.device); return; }
+    if(obj.type!=='urban') return;
+    const n=ensureNode(obj.device); n.samples++; n.bubble.querySelector('.small').textContent = n.samples+' samples';
+    el('mSamples').textContent = (parseInt(el('mSamples').textContent)||0)+1;
+    if(obj.geo){
+      const ni = Math.min(1, Math.max(0, (obj.noise_db||0)/100));
+      const hi = Math.min(1, Math.max(0, obj.haze||0));
+      if(ni>0) heatNoise.addLatLng([obj.geo.lat, obj.geo.lon, ni]);
+      if(hi>0) heatHaze.addLatLng([obj.geo.lat, obj.geo.lon, hi]);
+    }
+    rows.push([obj.device, obj.ts, obj.noise_db||'', obj.haze||'', obj.light||'', obj.geo?obj.geo.lat:'', obj.geo?obj.geo.lon:'', obj.mission||'']);
+    // rolling averages
+    const last100 = rows.slice(-100);
+    const mean = (arr)=> arr.length? (arr.reduce((p,c)=>p+Number(c||0),0)/arr.length):0;
+    const avgNoise = mean(last100.map(r=>parseFloat(r[2]))).toFixed(1);
+    const avgHaze  = mean(last100.map(r=>parseFloat(r[3]))).toFixed(2);
+    el('mNoise').textContent = avgNoise; el('mHaze').textContent = avgHaze;
+  }
+
+  function exportCSV(){
+    let csv='device,ts_iso,noise_db,haze,light,lat,lon,mission\n'+rows.map(r=>r.join(',')).join('\n');
+    const blob=new Blob([csv],{type:'text/csv'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='urban_breath_blush_pro.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('acceptBtn').addEventListener('click', accept);
+  document.getElementById('sendMissions').addEventListener('click', sendMissions);
+  document.getElementById('clearMissions').addEventListener('click', ()=>{ missions=[]; missionLayer.clearLayers(); renderMissionList(); });
+  document.getElementById('addMission').addEventListener('click', ()=>{ addMission(map.getCenter()); });
+  document.getElementById('exportBtn').addEventListener('click', exportCSV);
+})();
+</script>
+</body>
+</html>
