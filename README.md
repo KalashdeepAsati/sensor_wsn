@@ -1,4 +1,4 @@
-# Urban Breath — Blush Pro (Crowd Missions, Gamified Sensing)
+# Urban Breath — (Crowd Missions, Gamified Sensing)
 
 **What this is:** A professional, pink–white themed WSN prototype that looks nothing like SirenNet. It adds **Crowd Missions** (named geofences), **gamified progress + points**, and a polished dashboard.
 
